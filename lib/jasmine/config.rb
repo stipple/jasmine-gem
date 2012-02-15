@@ -99,6 +99,10 @@ module Jasmine
       stylesheets.collect {|f| "/" + f }
     end
 
+    def assets_files
+      assets.collect {|f| "/" + f }
+    end
+
     def spec_files_full_paths
       spec_files.collect {|spec_file| File.join(spec_dir, spec_file) }
     end
@@ -154,6 +158,14 @@ module Jasmine
     def stylesheets
       if simple_config['stylesheets']
         match_files(src_dir, simple_config['stylesheets'])
+      else
+        []
+      end
+    end
+
+    def asssets
+      if simple_config['stylesheets']
+        match_files(src_dir, simple_config['assets_dir'])
       else
         []
       end

@@ -15,8 +15,8 @@ module Jasmine
     end
 
     def not_found
-      body = "File not found: #{@path_info}\n"
-      [404, {"Content-Type" => "text/plain",
+      body = "Empty: #{@path_info}\n"
+      [200, {"Content-Type" => "text/plain",
              "Content-Length" => body.size.to_s,
              "X-Cascade" => "pass"},
        [body]]
@@ -60,6 +60,16 @@ module Jasmine
     end
   end
 
+  class BlankAsset
+    def call(env)
+      [
+        200,
+        { 'Content-Type' => 'image/jpeg' },
+        [""]
+      ]
+    end
+  end
+
   class FocusedSuite
     def initialize(config)
       @config = config
@@ -78,6 +88,10 @@ module Jasmine
         map('/assets') do
           run Rails.application.assets
         end
+      end
+
+      map('/images') do
+        run Jasmine::BlankAsset.new
       end
 
       map('/run.html')         { run Jasmine::Redirect.new('/') }
