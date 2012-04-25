@@ -16,9 +16,14 @@ module Jasmine
     end
 
     def start_server(port = 8888)
-      server = Rack::Server.new(:Port => port, :AccessLog => [])
-      server.instance_variable_set(:@app, Jasmine.app(self)) # workaround for Rack bug, when Rack > 1.2.1 is released Rack::Server.start(:app => Jasmine.app(self)) will work
-      server.start
+      if defined? Rack::Server # Rack ~>1.0 compatibility
+        server = Rack::Server.new(:Port => port, :AccessLog => [])
+        server.instance_variable_set(:@app, Jasmine.app(self)) # workaround for Rack bug, when Rack > 1.2.1 is released Rack::Server.start(:app => Jasmine.app(self)) will work
+        server.start
+      else
+        handler = Rack::Handler.get('webrick')
+        handler.run(Jasmine.app(self), :Port => port, :AccessLog => [])
+      end
     end
 
     def start
@@ -34,9 +39,13 @@ module Jasmine
     def start_jasmine_server
       require 'json'
       @jasmine_server_port = jasmine_port
-      Thread.new do
-        start_server(@jasmine_server_port)
+      t = Thread.new do
+        begin
+          start_server(@jasmine_server_port)
+        rescue ChildProcess::TimeoutError; end
+        #ignore bad exits
       end
+      t.abort_on_exception = true
       Jasmine::wait_for_listener(@jasmine_server_port, "jasmine server")
       puts "jasmine server started."
     end
