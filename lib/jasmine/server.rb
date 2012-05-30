@@ -4,6 +4,7 @@ require 'jasmine-core'
 require 'rack/jasmine/runner'
 require 'rack/jasmine/focused_suite'
 require 'rack/jasmine/redirect'
+require 'rack/jasmine/blank_asset'
 require 'rack/jasmine/cache_control'
 require 'ostruct'
 
@@ -24,7 +25,7 @@ module Jasmine
       end
 
       map('/images') do
-        run Jasmine::BlankAsset.new
+        run Rack::Jasmine::BlankAsset.new
       end
 
       map('/run.html')         { run Rack::Jasmine::Redirect.new('/') }
