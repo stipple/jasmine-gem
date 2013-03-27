@@ -11,6 +11,12 @@ This gem contains:
 
 You can get all of this by: `gem install jasmine` or by adding Jasmine to your `Gemfile`.
 
+```ruby
+group :development, :test do
+  gem 'jasmine'
+end
+```
+
 ## Init A Project
 
 To initialize a project for Jasmine, it depends on your web framework
@@ -46,14 +52,12 @@ For Continuous Integration environments, add this task to the project build step
 
 `rake jasmine:ci`
 
-This uses Selenium to launch a browser and run the Jasmine suite. Then it uses RSpec to extract the results from the Jasmine reporter and write them to your build log.
+This uses Selenium to launch a browser and run the Jasmine suite. Then it uses RSpec to extract the results from the Jasmine reporter and write them to your build log. The browser used by selenium can be changed by setting the JASMINE_BROWSER environment variable (this might require additional webdriver dependencies).
 
 ## Configuration
 
 Customize `spec/javascripts/support/jasmine.yml` to enumerate the source files, stylesheets, and spec files you would like the Jasmine runner to include.
 You may use dir glob strings.
-
-For more complex configuration (e.g., port number), edit `spec/javascripts/support/jasmine_config.rb` file directly.
 
 ## Note about the CI task and RSpec
 

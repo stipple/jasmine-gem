@@ -27,7 +27,7 @@ namespace :jasmine do
         t.rspec_opts = ["--colour", "--format", ENV['JASMINE_SPEC_FORMAT'] || "progress"]
         t.verbose = true
         if Jasmine::Dependencies.rails_3_asset_pipeline?
-          t.ruby_opts = ["-r #{File.expand_path(File.join(::Rails.root, 'config', 'environment'))}"]
+          t.rspec_opts += ["-r #{File.expand_path(File.join(::Rails.root, 'config', 'environment'))}"]
         end
         t.pattern = [Jasmine.runner_filepath]
       end
@@ -42,13 +42,12 @@ namespace :jasmine do
   end
 
   task :server => "jasmine:require" do
-    jasmine_config_overrides = File.join(Jasmine::Config.new.project_root, 'spec', 'javascripts' ,'support' ,'jasmine_config.rb')
-    require jasmine_config_overrides if File.exist?(jasmine_config_overrides)
-
     port = ENV['JASMINE_PORT'] || 8888
     puts "your tests are here:"
     puts "  http://localhost:#{port}/"
-    Jasmine::Config.new.start_server(port)
+    Jasmine.load_configuration_from_yaml
+    app = Jasmine::Application.app(Jasmine.config)
+    Jasmine::Server.new(port, app).start
   end
 end
 

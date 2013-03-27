@@ -1,176 +1,85 @@
 module Jasmine
-  class Config
-    require 'yaml'
-    require 'erb'
+  require 'yaml'
+  require 'erb'
+  def self.configure(&block)
+    block.call(self.config)
+  end
 
-    def browser
-      ENV["JASMINE_BROWSER"] || 'firefox'
+  def self.initialize_config
+    return if @config
+    @config = Jasmine::Configuration.new
+    core_config = Jasmine::CoreConfiguration.new
+
+    @config.add_path_mapper(Jasmine::PathMapper.method(:new))
+
+    @config.jasmine_path = jasmine_path = "/__jasmine__"
+    @config.src_path = src_path = "/"
+    @config.spec_path = spec_path = "/__spec__"
+    @config.boot_path = boot_path = "/__boot__"
+
+    @config.jasmine_dir = core_config.path
+    @config.boot_dir = core_config.boot_path
+    @config.boot_files = lambda { core_config.boot_files }
+    @config.jasmine_files = lambda { core_config.js_files }
+    @config.jasmine_css_files = lambda { core_config.css_files }
+    @config.add_rack_path(jasmine_path, lambda { Rack::File.new(config.jasmine_dir) })
+    @config.add_rack_path(boot_path, lambda { Rack::File.new(config.boot_dir) })
+    @config.add_rack_path(spec_path, lambda { Rack::File.new(config.spec_dir) })
+    @config.add_rack_path(src_path, lambda {
+      Rack::Cascade.new([
+        Rack::URLMap.new('/' => Rack::File.new(config.src_dir)),
+        Rack::Jasmine::Runner.new(Jasmine::Page.new(config))
+      ])
+    })
+
+    @config.add_rack_app(Rack::Head)
+    @config.add_rack_app(Rack::Jasmine::CacheControl)
+
+    if Jasmine::Dependencies.rails_3_asset_pipeline?
+      @config.add_path_mapper(lambda { |config|
+        asset_expander = Jasmine::AssetExpander.new(
+          Jasmine::AssetPipelineUtility.method(:bundled_asset_factory),
+          Jasmine::AssetPipelineUtility.method(:asset_path_for)
+        )
+        Jasmine::AssetPipelineMapper.new(config, asset_expander.method(:expand))
+      })
+      @config.add_rack_path('/assets', lambda {
+        # In order to have asset helpers like asset_path and image_path, we need to require 'action_view/base'.  This
+        # triggers run_load_hooks on action_view which, in turn, causes sprockets/railtie to load the Sprockets asset
+        # helpers.  Alternatively, you can include the helpers yourself without loading action_view/base:
+        Rails.application.assets.context_class.instance_eval do
+          include ::Sprockets::Helpers::IsolatedHelper
+          include ::Sprockets::Helpers::RailsHelper
+        end
+        Rails.application.assets
+      })
     end
 
-    def jasmine_host
-      ENV["JASMINE_HOST"] || 'http://localhost'
-    end
+  end
 
-    def jasmine_port
-      ENV["JASMINE_PORT"] || Jasmine::find_unused_port
-    end
+  def self.config
+    initialize_config
+    @config
+  end
 
-    def start_server(port = 8888)
-      if defined? Rack::Server # Rack ~>1.0 compatibility
-        server = Rack::Server.new(:Port => port, :AccessLog => [])
-        server.instance_variable_set(:@app, Jasmine.app(self)) # workaround for Rack bug, when Rack > 1.2.1 is released Rack::Server.start(:app => Jasmine.app(self)) will work
-        server.start
-      else
-        handler = Rack::Handler.get('webrick')
-        handler.run(Jasmine.app(self), :Port => port, :AccessLog => [])
+  def self.load_configuration_from_yaml(path = nil)
+    path ||= File.join(Dir.pwd, 'spec', 'javascripts', 'support', 'jasmine.yml')
+    if File.exist?(path)
+      yaml_loader = lambda do |filepath|
+        YAML::load(ERB.new(File.read(filepath)).result(binding)) if File.exist?(filepath)
       end
-    end
-
-    def start
-      start_jasmine_server
-      @client = Jasmine::SeleniumDriver.new(browser, "#{jasmine_host}:#{@jasmine_server_port}/")
-      @client.connect
-    end
-
-    def stop
-      @client.disconnect
-    end
-
-    def start_jasmine_server
-      require 'json'
-      @jasmine_server_port = jasmine_port
-      t = Thread.new do
-        begin
-          start_server(@jasmine_server_port)
-        rescue ChildProcess::TimeoutError; end
-        #ignore bad exits
+      yaml_config = Jasmine::YamlConfigParser.new(path, Dir.pwd, Jasmine::PathExpander.method(:expand), yaml_loader)
+      Jasmine.configure do |config|
+        config.jasmine_dir = yaml_config.jasmine_dir if yaml_config.jasmine_dir
+        config.jasmine_files = lambda { yaml_config.jasmine_files } if yaml_config.jasmine_files.any?
+        config.jasmine_css_files = lambda { yaml_config.jasmine_css_files } if yaml_config.jasmine_css_files.any?
+        config.src_files = lambda { yaml_config.src_files }
+        config.spec_files = lambda { yaml_config.helpers + yaml_config.spec_files }
+        config.css_files = lambda { yaml_config.css_files }
+        config.src_dir = yaml_config.src_dir
+        config.spec_dir = yaml_config.spec_dir
       end
-      t.abort_on_exception = true
-      Jasmine::wait_for_listener(@jasmine_server_port, "jasmine server")
-      puts "jasmine server started."
-    end
-
-    def windows?
-      require 'rbconfig'
-      ::RbConfig::CONFIG['host_os'] =~ /mswin|mingw/
-    end
-
-    def run
-      begin
-        start
-        puts "servers are listening on their ports -- running the test script..."
-        tests_passed = @client.run
-      ensure
-        stop
-      end
-      return tests_passed
-    end
-
-    def eval_js(script)
-      @client.eval_js(script)
-    end
-
-    def json_generate(obj)
-      @client.json_generate(obj)
-    end
-
-    def match_files(dir, patterns)
-      dir = File.expand_path(dir)
-      negative, positive = patterns.partition {|pattern| /^!/ =~ pattern}
-      chosen, negated = [positive, negative].collect do |patterns|
-        patterns.collect do |pattern|
-          matches = Dir.glob(File.join(dir, pattern.gsub(/^!/,'')))
-          matches.empty? && !(pattern =~ /\*|^\!/) ? pattern : matches.collect {|f| f.sub("#{dir}/", "")}.sort
-        end.flatten.uniq
-      end
-      chosen - negated
-    end
-
-    def simple_config
-      config = File.exist?(simple_config_file) ? YAML::load(ERB.new(File.read(simple_config_file)).result(binding)) : false
-      config || {}
-    end
-
-
-    def spec_path
-      "/__spec__"
-    end
-
-    def root_path
-      "/__root__"
-    end
-
-    def js_files(spec_filter = nil)
-      spec_files_to_include = spec_filter.nil? ? spec_files : match_files(spec_dir, [spec_filter])
-      src_files.collect {|f| "/" + f } + helpers.collect {|f| File.join(spec_path, f) } + spec_files_to_include.collect {|f| File.join(spec_path, f) }
-    end
-
-    def css_files
-      stylesheets.collect {|f| "/" + f }
-    end
-
-    def assets_files
-      assets.collect {|f| "/" + f }
-    end
-
-    def spec_files_full_paths
-      spec_files.collect {|spec_file| File.join(spec_dir, spec_file) }
-    end
-
-    def project_root
-      Dir.pwd
-    end
-
-    def simple_config_file
-      File.join(project_root, 'spec/javascripts/support/jasmine.yml')
-    end
-
-    def src_dir
-      if simple_config['src_dir']
-        File.join(project_root, simple_config['src_dir'])
-      else
-        project_root
-      end
-    end
-
-    def spec_dir
-      if simple_config['spec_dir']
-        File.join(project_root, simple_config['spec_dir'])
-      else
-        File.join(project_root, 'spec/javascripts')
-      end
-    end
-
-    def helpers
-      if simple_config['helpers']
-        match_files(spec_dir, simple_config['helpers'])
-      else
-        match_files(spec_dir, ["helpers/**/*.js"])
-      end
-    end
-
-    def src_files
-      if simple_config['src_files']
-        match_files(src_dir, simple_config['src_files'])
-      else
-        []
-      end
-    end
-
-    def spec_files
-      if simple_config['spec_files']
-        match_files(spec_dir, simple_config['spec_files'])
-      else
-        match_files(spec_dir, ["**/*[sS]pec.js"])
-      end
-    end
-
-    def stylesheets
-      if simple_config['stylesheets']
-        match_files(src_dir, simple_config['stylesheets'])
-      else
-        []
-      end
+      require yaml_config.spec_helper if File.exist?(yaml_config.spec_helper)
     end
 
     def asssets
@@ -181,4 +90,5 @@ module Jasmine
       end
     end
   end
+
 end

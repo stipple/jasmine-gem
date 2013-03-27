@@ -1,45 +1,19 @@
-require 'rack'
-require 'rack/utils'
-require 'jasmine-core'
-require 'rack/jasmine/runner'
-require 'rack/jasmine/focused_suite'
-require 'rack/jasmine/redirect'
-require 'rack/jasmine/blank_asset'
-require 'rack/jasmine/cache_control'
-require 'ostruct'
-
 module Jasmine
-  def self.app(config)
-    jasmine_stylesheets = ::Jasmine::Core.css_files.map {|f| "/__JASMINE_ROOT__/#{f}"}
-    config_shim = OpenStruct.new({:jasmine_files => ::Jasmine::Core.js_files.map {|f| "/__JASMINE_ROOT__/#{f}"},
-                                  :js_files => config.js_files,
-                                  :css_files => jasmine_stylesheets + (config.css_files || [])})
-    page = Jasmine::Page.new(config_shim.instance_eval { binding })
-    Rack::Builder.app do
-      use Rack::Head
-      use Rack::Jasmine::CacheControl
-      if Jasmine::Dependencies.rails_3_asset_pipeline?
-        map('/assets') do
-          run Rails.application.assets
-        end
-      end
+  class Server
+    def initialize(port = 8888, application = nil)
+      @port = port
+      @application = application
+    end
 
-      map('/images') do
-        run Rack::Jasmine::BlankAsset.new
-      end
-
-      map('/run.html')         { run Rack::Jasmine::Redirect.new('/') }
-      map('/__suite__')        { run Rack::Jasmine::FocusedSuite.new(config) }
-
-      map('/__JASMINE_ROOT__') { run Rack::File.new(Jasmine::Core.path) }
-      map(config.spec_path)    { run Rack::File.new(config.spec_dir) }
-      map(config.root_path)    { run Rack::File.new(config.project_root) }
-
-      map('/') do
-        run Rack::Cascade.new([
-          Rack::URLMap.new('/' => Rack::File.new(config.src_dir)),
-          Rack::Jasmine::Runner.new(page)
-        ])
+    def start
+      if Jasmine::Dependencies.legacy_rack?
+        handler = Rack::Handler.get('webrick')
+        handler.run(@application, :Port => @port, :AccessLog => [])
+      else
+        server = Rack::Server.new(:Port => @port, :AccessLog => [])
+        # workaround for Rack bug, when Rack > 1.2.1 is released Rack::Server.start(:app => Jasmine.app(self)) will work
+        server.instance_variable_set(:@app, @application)
+        server.start
       end
     end
   end
